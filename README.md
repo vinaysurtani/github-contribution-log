@@ -3,7 +3,7 @@
 **Contribution Number:** 1  
 **Student:** Vinay Surtani  
 **Issue:** https://github.com/lance-format/lance/issues/1106  
-**Status:** Phase II Complete
+**Status:** Phase III In Progress
 
 ---
 
@@ -120,36 +120,46 @@ Using UMPIRE framework (adapted):
 
 ### Unit Tests
 
-- [ ] Test case 1: [Description]
-- [ ] Test case 2: [Description]
-- [ ] Test case 3: [Description]
+- [x] `test_input_data[NoneType-list]` — Pydantic instances added to existing parametrized suite; verifies auto-conversion produces correct PyArrow table
+- [x] `test_from_pydantic_model` — verifies classmethod writes data, infers schema, and round-trips correctly
 
 ### Integration Tests
 
-- [ ] Integration scenario 1
-- [ ] Integration scenario 2
+- [x] `reproduce.py` — end-to-end script confirming `write_dataset()` accepts Pydantic instances directly and the manual workaround still works
 
 ### Manual Testing
 
-[What you tested manually and results]
+Ran `python reproduce.py` after implementing the fix. Output confirmed 2 rows written successfully without manual `.model_dump()` calls. Also confirmed the old manual workaround path still functions correctly (no regressions). All 8 parametrized `test_input_data` variants pass including the new Pydantic entry.
 
 ---
 
 ## Implementation Notes
 
-### Week [X] Progress
+### Week 3 Progress
 
-[What you built this week, challenges faced, decisions made]
+Implemented both parts of the issue:
 
-### Week [Y] Progress
+**Part 1 — Auto-convert Pydantic instances in `write_dataset()`:**
+Added a new branch in `_coerce_reader()` in `types.py` that detects when the input is a list of Pydantic `BaseModel` instances, automatically calls `.model_dump()` on each, and converts to a PyArrow RecordBatch. Also added `_check_for_pydantic()` to `dependencies.py` following the same optional-dependency pattern used for pandas, polars, and HuggingFace. The branch is placed before the generic `Iterable` branch to ensure Pydantic instances are caught specifically rather than falling through to the error path.
 
-[Continue documenting as you work]
+**Part 2 — `LanceDataset.from_pydantic_model()` classmethod:**
+Added a classmethod to `LanceDataset` in `dataset.py` that accepts a Pydantic model class and a list of instances, converts the class name to snake_case for the default URI, and calls `write_dataset()` with the inferred schema.
+
+**Challenges:**
+- The pre-commit `ruff` linter auto-reformatted imports on first commit — learned to re-stage and commit again after auto-fixes
+- Needed to support both Pydantic v1 (`.dict()`) and v2 (`.model_dump()`) — used `hasattr` check to handle both
 
 ### Code Changes
 
-- **Files modified:** [List]
-- **Key commits:** [Links to important commits]
-- **Approach decisions:** [Why you chose certain approaches]
+- **Files modified:**
+  - `python/python/lance/dependencies.py` — added `_PYDANTIC_AVAILABLE` and `_check_for_pydantic()`
+  - `python/python/lance/types.py` — added Pydantic branch in `_coerce_reader()`
+  - `python/python/lance/dataset.py` — added `from_pydantic_model()` classmethod
+  - `python/python/tests/test_dataset.py` — added Pydantic to `test_input_data` parametrize list and new `test_from_pydantic_model` test
+- **Key commits:**
+  - [Add Pydantic model instance support in _coerce_reader](https://github.com/vinaysurtani/lance/commit/5620779a)
+  - [Add LanceDataset.from_pydantic_model() classmethod and tests](https://github.com/vinaysurtani/lance/commit/5bfdbf5a)
+- **Approach decisions:** Followed the existing `_check_for_pandas` / `_check_for_hugging_face` pattern for optional dependency detection rather than importing pydantic unconditionally. Added Pydantic to the existing `test_input_data` parametrized suite rather than writing standalone tests, which ensures the new input type is tested consistently with all other supported types.
 
 ---
 

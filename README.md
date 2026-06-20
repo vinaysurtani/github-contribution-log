@@ -1,15 +1,15 @@
-# Contribution [#]: [Issue Title]
+# Contribution 1: Working with Pydantic Model Instances
 
-**Contribution Number:** [1 / 2 / 3]  
-**Student:** [Your Name]  
-**Issue:** [GitHub issue link]  
-**Status:** [Phase I / Phase II / Phase III / Phase IV] [In Progress / Complete]
+**Contribution Number:** 1  
+**Student:** Vinay Surtani  
+**Issue:** https://github.com/lance-format/lance/issues/1106  
+**Status:** Phase I Complete
 
 ---
 
 ## Why I Chose This Issue
 
-[1-2 paragraphs explaining why this issue interests you, how it matches your skills/learning goals, what you hope to learn]
+The Lance library currently requires users to manually call `pydantic_to_schema` when creating a table from a Pydantic model, and to explicitly convert model instances to dictionaries before writing data — both steps that the library could handle automatically. This friction makes the API harder to use for developers who are already working with Pydantic models, which are extremely common in Python ML and data pipelines. I chose this issue because it's a well-scoped ergonomic improvement with clear acceptance criteria, and it will push me to understand how Lance handles data ingestion and schema inference under the hood. It's also labeled "good first issue," which gives me confidence that the scope is right for a first open-source contribution.
 
 ---
 

@@ -177,8 +177,7 @@ Added a classmethod to `LanceDataset` in `dataset.py` that accepts a Pydantic mo
 - Added to existing `test_input_data` parametrized suite + new `test_from_pydantic_model` test; 196 passed, 4 pre-existing nvcc failures unrelated to this change
 
 **Maintainer Feedback:**
-- [Date]: [Summary of feedback received]
-- [Date]: [How you addressed it]
+- No feedback received yet — PR is currently awaiting review
 
 **Status:** Awaiting Review
 
@@ -188,20 +187,32 @@ Added a classmethod to `LanceDataset` in `dataset.py` that accepts a Pydantic mo
 
 ### Technical Skills Gained
 
-[What you learned technically]
+- **Tracing an unfamiliar codebase:** Learned to follow the data path from `write_dataset()` down through `_coerce_reader()` to understand exactly where a new type needs to be handled, rather than guessing at the right insertion point.
+- **Optional dependency patterns:** Understood how mature libraries gate optional integrations — the `_PYDANTIC_AVAILABLE` flag and `_check_for_pydantic()` helper follow the exact same pattern used for pandas, polars, and HuggingFace, keeping the core library lean while supporting rich integrations.
+- **Pydantic v1/v2 compatibility:** Learned that Pydantic v2 renamed `.dict()` to `.model_dump()` and that a simple `hasattr` check is the idiomatic way to support both versions without version pinning.
+- **PyArrow schema inference:** Learned how to derive a PyArrow schema from a Pydantic model class using `model_fields` and `pydantic_to_schema`, and how to build a `RecordBatch` from a list of dicts.
+- **Building a Rust-backed Python library:** Got hands-on experience with `uv`, `maturin`, and the full Rust + protobuf build chain. Learned why the first build takes ~30 minutes and subsequent incremental builds are much faster.
+- **Pre-commit and ruff:** Learned that ruff auto-reformats on commit and that the correct workflow is to re-stage the auto-fixed files and commit again rather than fighting the formatter.
 
 ### Challenges Overcome
 
-[What was hard and how you solved it]
+- **Build environment from scratch:** Ubuntu 24.04 blocks system-wide `pip` installs and `pre-commit` is not available via `apt` — had to discover and use `uv` and `pipx` as the correct tools. This took significant trial and error before the build succeeded.
+- **Finding the right place to make the change:** `write_dataset()` is a thin wrapper; the real logic is in `_coerce_reader()` three layers down. Reading the traceback carefully (the "Must provide schema" error) and grep-searching for that string led directly to the right function.
+- **Test failures not caused by my change:** Four tests failed with `PermissionError: [Errno 13] Permission denied: 'nvcc'` — the CUDA compiler is absent in the dev environment. Had to confirm these were pre-existing failures by checking that the failing tests are unrelated to anything modified, before deciding it was safe to submit.
+- **Schema inference edge cases:** The initial implementation only supported Pydantic v2's `model_dump()`. Discovered mid-testing that v1 uses `.dict()`, and added the compatibility shim.
 
 ### What I'd Do Differently Next Time
 
-[Reflection on your process]
+- **Read CONTRIBUTING.md first, before writing any code.** I spent time on the implementation before checking the project's conventions for tests, docstrings, and optional dependencies — discovering the existing patterns earlier would have saved a round of refactoring.
+- **Grep for the error message immediately.** The "Must provide schema" error string led directly to the right function in under a minute. I should default to searching the codebase with the exact error message as the first investigative step.
+- **Check if CUDA tests pass elsewhere before worrying about them.** The nvcc failures were a distraction — checking the repo's CI configuration upfront would have shown immediately that those tests require hardware not available in standard dev environments.
 
 ---
 
 ## Resources Used
 
-- [Link to helpful documentation]
-- [Tutorial or Stack Overflow post that helped]
-- [GitHub issues or discussions that helped]
+- [Lance CONTRIBUTING.md](https://github.com/lance-format/lance/blob/main/CONTRIBUTING.md) — project conventions for tests, optional dependencies, and PR requirements
+- [Pydantic v1/v2 migration guide](https://docs.pydantic.dev/latest/migration/) — reference for `.dict()` → `.model_dump()` rename and compatibility patterns
+- [PyArrow documentation — Schema and RecordBatch](https://arrow.apache.org/docs/python/api/datatypes.html) — used for understanding how to construct a `pa.Table` from a list of dicts with an explicit schema
+- [uv documentation](https://docs.astral.sh/uv/) — reference for setting up the Python environment without conflicting with Ubuntu's managed Python
+- [Original GitHub issue #1106](https://github.com/lance-format/lance/issues/1106) — issue description and discussion that clarified the expected API design

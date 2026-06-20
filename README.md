@@ -3,7 +3,7 @@
 **Contribution Number:** 1  
 **Student:** Vinay Surtani  
 **Issue:** https://github.com/lance-format/lance/issues/1106  
-**Status:** Phase III In Progress
+**Status:** Awaiting Review
 
 ---
 
@@ -167,15 +167,20 @@ Added a classmethod to `LanceDataset` in `dataset.py` that accepts a Pydantic mo
 
 ## Pull Request
 
-**PR Link:** [GitHub PR URL when submitted]
+**PR Link:** https://github.com/lance-format/lance/pull/7383
 
-**PR Description:** [Draft or final PR description - much of the content above can be adapted]
+**PR Description Summary:**
+- Added Pydantic model instance auto-conversion in `_coerce_reader()` so `write_dataset()` accepts lists of `BaseModel` instances directly, without requiring manual `.model_dump()` calls
+- Added `LanceDataset.from_pydantic_model(model_class, data, uri=None, **kwargs)` classmethod that infers the dataset URI from the model class name (snake_case) and delegates to `write_dataset()`
+- Pydantic treated as optional dependency using same `_PYDANTIC_AVAILABLE` / `_check_for_pydantic()` pattern as pandas and HuggingFace
+- Supports both Pydantic v1 (`.dict()`) and v2 (`.model_dump()`)
+- Added to existing `test_input_data` parametrized suite + new `test_from_pydantic_model` test; 196 passed, 4 pre-existing nvcc failures unrelated to this change
 
 **Maintainer Feedback:**
 - [Date]: [Summary of feedback received]
 - [Date]: [How you addressed it]
 
-**Status:** [Awaiting review / Iterating / Approved / Merged]
+**Status:** Awaiting Review
 
 ---
 

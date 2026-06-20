@@ -131,6 +131,8 @@ Using UMPIRE framework (adapted):
 
 Ran `python reproduce.py` after implementing the fix. Output confirmed 2 rows written successfully without manual `.model_dump()` calls. Also confirmed the old manual workaround path still functions correctly (no regressions). All 8 parametrized `test_input_data` variants pass including the new Pydantic entry.
 
+Ran the full `test_dataset.py` suite: **196 passed, 1 skipped, 4 failed**. The 4 failures (`test_random_dataset_recall_accelerated`, `test_random_dataset_recall_accelerated_one_pass`, `test_count_index_rows_accelerated`, `test_count_index_rows_accelerated_one_pass`) all fail with `PermissionError: [Errno 13] Permission denied: 'nvcc'` — the CUDA compiler is not installed in the dev environment. These tests are pre-existing failures unrelated to this change and do not touch any code modified in this PR.
+
 ---
 
 ## Implementation Notes

@@ -3,7 +3,7 @@
 **Contribution Number:** 1  
 **Student:** Vinay Surtani  
 **Issue:** https://github.com/lance-format/lance/issues/1106  
-**Status:** Awaiting Review
+**Status:** Awaiting Review — Phase IV Complete
 
 ---
 

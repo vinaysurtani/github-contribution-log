@@ -3,7 +3,7 @@
 **Contribution Number:** 1  
 **Student:** Vinay Surtani  
 **Issue:** https://github.com/lance-format/lance/issues/1106  
-**Status:** Awaiting Review — Phase IV Complete
+**Status:** Changes Requested — Phase IV (Follow-Up Discussion Posted)
 
 ---
 
@@ -177,9 +177,85 @@ Added a classmethod to `LanceDataset` in `dataset.py` that accepts a Pydantic mo
 - Added to existing `test_input_data` parametrized suite + new `test_from_pydantic_model` test; 196 passed, 4 pre-existing nvcc failures unrelated to this change
 
 **Maintainer Feedback:**
-- No feedback received yet — PR is currently awaiting review
+- @westonpace (maintainer) left a `CHANGES_REQUESTED` review: 7 inline comments plus one top-level design question about whether `from_pydantic_model()` is necessary given `write_dataset()` already handles the core case
+- @prrao87 raised a separate, out-of-scope question about continued Pydantic v1 support (not yet addressed)
+- See "Code Review Feedback" section below for the full comment-by-comment breakdown
 
-**Status:** Awaiting Review
+**Status:** Changes Requested — Follow-Up Discussion Posted (see below)
+
+---
+
+## Code Review Feedback
+
+**Reviewer:** @westonpace (Lance maintainer) — `CHANGES_REQUESTED`, 7 inline comments + 1 top-level design question
+**Also commented:** @prrao87 — separate scope question about continued Pydantic v1 support, not addressed yet
+
+Worked through each comment individually: verified the underlying claim against the actual code (and, where he referenced a specific function name, against Lance's git history and the sibling `lancedb` project) before making any change, rather than assuming the comment was correct as written.
+
+### Comment-by-Comment
+
+1. **Missing `else` branch in the pydantic check (`types.py`)**
+   His point: `_check_for_pydantic` can return false positives (it's a module-name heuristic, not a real `isinstance` check), and if it matches but the object isn't actually a `BaseModel`, the function silently falls through with no `else` and returns `None`.
+   Fix: replaced `_check_for_pydantic` with a new `_is_pydantic_base_model()` helper that does a real `isinstance` check directly as the `elif` condition — so a false positive now falls through to the next branch instead of silently returning `None`. Verified with a list of `pydantic.AnyUrl` objects (a real pydantic type, but not a `BaseModel`) — now raises a clear error instead of returning `None`.
+   **Fixed & tested.**
+
+2. **Schema inferred from data instead of from the model class (`dataset.py`)**
+   His point: referenced `pydantic_to_schema` as precedent. That function doesn't exist in this repo (confirmed by grep) — it's in the sibling `lancedb` project (`lancedb/pydantic.py`). Reproduced the actual bug independently: an `Optional` field that's `None` across an entire batch was getting typed as Arrow's literal `null` type instead of its real type, because schema was inferred from row data, not from the model.
+   Fix: added `_pydantic_model_to_schema()`, deriving a real `pa.Schema` from the model class's own field annotations (`model_fields`/`__fields__`), handling `Optional`/`list` wrapping. Verified an `Optional[str]` field now correctly types as nullable `string` even when every value in a batch is `None`, and that appending a row with a real value afterward no longer breaks on schema mismatch.
+   **Fixed & tested.**
+
+3. **No error on empty `data` list (`dataset.py`)**
+   His point: should raise if `data` is empty.
+   Finding: before fixing #2, an empty list silently produced a dataset with **zero columns** — `pa.Table.from_pylist([])` succeeds with an empty schema rather than erroring. After fixing #2, an empty list now produces a correctly-shaped 0-row dataset instead, which is arguably valid on its own — but added the explicit guard anyway as a fail-safe, since that's what he asked for.
+   Fix: added `if not data: raise ValueError(...)` at the top of `from_pydantic_model`.
+   **Fixed & tested.**
+
+4. **Why prefer `.model_dump()` over `.dict()`, and be consistent with `_into_pyarrow_reader` (`dataset.py`)**
+   His point: referenced `_into_pyarrow_reader` as the place to be consistent with. That function also doesn't exist in this repo — it's a real function in `lancedb/table.py`, whose pydantic branch calls a shared `model_to_dict()` helper (also from `lancedb/pydantic.py`).
+   Finding: verified empirically that `.dict()` on pydantic v2 emits a `PydanticDeprecatedSince20` warning while `.model_dump()` doesn't, and that pydantic v1 has no `.model_dump()` at all — so the `hasattr` fallback isn't arbitrary, it's the only way to support both without warnings or crashes.
+   Fix: extracted the previously copy-pasted logic (identical in `types.py` and `dataset.py`) into one shared `model_to_dict()` helper in `dependencies.py`, matching `lancedb`'s naming. Kept the per-call `hasattr` check rather than `lancedb`'s import-time version branch, since pydantic is an optional/lazy dependency here, unlike in `lancedb` where it's a hard dependency.
+   **Fixed & tested.**
+
+5. **`import re` inside the method instead of at module scope (`dataset.py`)**
+   Fix: moved to a top-level import (done as a side effect of the #2 fix, since the local import was inside the code already being changed).
+   **Fixed & tested.**
+
+6. **`pytest.importorskip("pydantic")` in the test file (`test_dataset.py`)**
+   His point: the test file does a bare `from pydantic import BaseModel` — should skip gracefully if pydantic isn't installed.
+   Finding: confirmed pydantic is **not** declared anywhere in `pyproject.toml`'s test dependencies (`[project.optional-dependencies].tests` or `[dependency-groups].tests`) — it's only present in the dev venv as a transitive dependency of something else, so this guard genuinely matters.
+   Fix: replaced the bare import with `BaseModel = pytest.importorskip("pydantic").BaseModel`. Verified with a throwaway test file that the mechanism produces a clean `skipped` result rather than a collection error when the target module is missing. Note: this is module-level, so if pydantic ever really were unavailable, all ~200 tests in this file would skip rather than just the pydantic-specific ones — the standard tradeoff of file-scope `importorskip`, and what he explicitly asked for.
+   **Fixed & tested.**
+
+7. **Accidental `.gitignore` change**
+   `reproduce.py` had been added to `.gitignore` — an unrelated leftover from local debugging.
+   Fix: reverted.
+   **Reverted.**
+
+### Top-Level Design Question (open)
+
+He also questioned whether `from_pydantic_model()` is needed at all, since the PR's own "After" example already shows plain `write_dataset(data, uri)` working directly (thanks to the `_coerce_reader` change). Confirmed by checking `upstream/main`: it has zero pydantic support before this PR, so the core capability is genuinely new and not in question — only the separate classmethod's justification is. Decided to put the keep-vs-drop decision back to him directly rather than presuming an answer, since it's his call as maintainer.
+
+### Verification
+
+Reran the full `python/tests/test_dataset.py` suite after all fixes: **196 passed, 4 failed, 1 skipped** — the 4 failures are the same pre-existing `nvcc`/CUDA-toolkit failures already noted before this review round, unrelated to any of these changes. No regressions introduced.
+
+**Files touched in this round:** `python/python/lance/dependencies.py`, `python/python/lance/types.py`, `python/python/lance/dataset.py`, `python/python/tests/test_dataset.py`, `.gitignore` (reverted).
+
+**Current state:** all fixes above are committed and pushed to the PR branch (`5620779` → `c998e03`).
+
+---
+
+## Follow-Up: Pydantic-to-Arrow Conversion Ownership Discussion
+
+**Context:** After the inline-comment round above, @westonpace left a general (non-inline) comment on the PR clarifying that he'd initially assumed it targeted `lancedb/lancedb` rather than `lance-format/lance` — which explains why his earlier comments referenced `pydantic_to_schema` and `_into_pyarrow_reader`, functions that live in the sibling `lancedb` repo, not this one. That raised a new question: `lancedb` already has a much more complete pydantic-to-arrow conversion (`lancedb/python/python/lancedb/pydantic.py`), supporting nested models (struct), `Enum`, tz-aware `datetime`, and custom `Vector`/`MultiVector` fixed-size-list types — none of which this PR's implementation covers. He asked whether that code should be migrated into `lance-format/lance` to avoid two diverging "dialects" of pydantic-to-arrow conversion, laying out options: proceed as-is (two dialects), move the conversion code into pylance (with embedding-function handling necessarily staying in lancedb, proxying to the moved code), or drop pydantic support from lance entirely. He also flagged @prrao87's earlier, separate question about continued Pydantic v1 support as something to weigh alongside this.
+
+**Analysis:** Read through `lancedb/pydantic.py` (pinned at commit `f8dc2f78`) and categorized its contents:
+- **Portable to lance (no embedding-function dependency):** `Vector`, `MultiVector`, `FixedSizeListMixin`, the type-dispatch helpers (`_py_type_to_arrow_type`, `_pydantic_type_to_arrow_type`, `_pydantic_to_field`, `is_nullable`, `_unwrap_optional_annotation`), `pydantic_to_schema()`, `get_extras()`, and `model_to_dict()` — the last of which was already independently reimplemented in this PR's `dependencies.py`, confirming that was the right call.
+- **Must stay lancedb-only:** `LanceModel.to_arrow_schema()`'s embedding-function parsing (`parse_embedding_functions`, `EmbeddingFunctionRegistry`) — lance has no concept of embedding functions, so this genuinely doesn't belong at the format level.
+
+**Reply posted:** Recommended moving the pure conversion logic into pylance, with lancedb proxying to it and keeping only embedding-function handling on top. Flagged that completing this requires coordinated PRs across two separate repos (`lance-format/lance` and `lancedb/lancedb`, different maintainer groups) plus a version-coupling story (lancedb pinning a minimum lance version) — too large to fold into this PR. Proposed splitting the work: open a separate tracking issue for the full migration, and keep this PR scoped to the initial scalar/`Optional`/`List` conversion already implemented, with `Vector`/`MultiVector`/struct/`Enum` support following once the migration lands. Recommended keeping the pydantic v1 deprecation question separate too, since lancedb still actively branches on `PYDANTIC_VERSION.major < 2`, making v1 a live support target there — deprecation deserves its own justification rather than riding along with this migration decision.
+
+**Status:** Reply posted to PR; awaiting maintainer response on the proposed minimal-scope + follow-up-issue split.
 
 ---
 

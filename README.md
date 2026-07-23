@@ -259,6 +259,21 @@ Reran the full `python/tests/test_dataset.py` suite after all fixes: **196 passe
 
 ---
 
+## Follow-Up: Migration Implementation (`pydantic-arrow-migration` branch)
+
+**Context:** Rather than wait idle on the maintainer's response to the scope-split proposal above, started the migration itself on a separate branch (`pydantic-arrow-migration`), so the full conversion logic is ready regardless of which option he picks.
+
+**What was ported**, from `lancedb/pydantic.py` (embedding-function registry code excluded — lance has no concept of embedding functions):
+- **`python/python/lance/pydantic.py`** (new, 426 lines) — `Vector`/`MultiVector` fixed-size-list types, nested `BaseModel` → Arrow struct support, `Enum` handling, tz-aware `datetime`, and the full type-dispatch chain (`pydantic_to_schema()`, `_pydantic_to_field`, `is_nullable`, etc.)
+- **`dataset.py`** — rewired `from_pydantic_model()` to call `lance.pydantic.pydantic_to_schema()` instead of the original PR's minimal `_pydantic_model_to_schema()`/`_pydantic_annotation_to_arrow_type()` helpers (which only covered scalars, `Optional`, and `List`). Net removal of ~54 lines of now-redundant scope-limited logic.
+- **`tests/test_pydantic.py`** (new) — covers struct (nested models), `Enum`, `Vector`/`MultiVector`, tz-aware `datetime`, and a behavior change worth flagging below.
+
+**Behavior change to note:** adopting lancedb's `is_nullable` logic tightens nullability inference — a field with a plain default value but a non-`Optional` type annotation is no longer treated as nullable (lancedb requires `Optional[...]` explicitly). This is a deliberate consistency choice (matches lancedb's semantics exactly, avoiding the two-dialect problem the maintainer raised) but is a behavior change from the original PR #7383 implementation, which inferred nullability more permissively.
+
+**Status:** Implemented and tested locally on `pydantic-arrow-migration` (commits `e22a02a`, `b470b5f`, `67dc8f1`, 2026-07-09). Not yet opened as a PR or tracking issue — still waiting to hear which option @westonpace prefers before proposing this as the actual migration path.
+
+---
+
 ## Learnings & Reflections
 
 ### Technical Skills Gained

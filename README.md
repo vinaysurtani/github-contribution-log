@@ -3,7 +3,7 @@
 **Contribution Number:** 1  
 **Student:** Vinay Surtani  
 **Issue:** https://github.com/lance-format/lance/issues/1106  
-**Status:** Changes Requested — Phase IV (Follow-Up Discussion Posted)
+**Status:** Changes Requested — Phase IV (3 rounds of automated CodeRabbit review on the migration branch addressed, pushed to PR)
 
 ---
 
@@ -181,7 +181,7 @@ Added a classmethod to `LanceDataset` in `dataset.py` that accepts a Pydantic mo
 - @prrao87 raised a separate, out-of-scope question about continued Pydantic v1 support (not yet addressed)
 - See "Code Review Feedback" section below for the full comment-by-comment breakdown
 
-**Status:** Changes Requested — Follow-Up Discussion Posted (see below)
+**Status:** Changes Requested — 3 rounds of automated CodeRabbit review on the migration branch addressed and pushed (see "CodeRabbit Automated Review" below)
 
 ---
 
@@ -271,6 +271,56 @@ Reran the full `python/tests/test_dataset.py` suite after all fixes: **196 passe
 **Behavior change to note:** adopting lancedb's `is_nullable` logic tightens nullability inference — a field with a plain default value but a non-`Optional` type annotation is no longer treated as nullable (lancedb requires `Optional[...]` explicitly). This is a deliberate consistency choice (matches lancedb's semantics exactly, avoiding the two-dialect problem the maintainer raised) but is a behavior change from the original PR #7383 implementation, which inferred nullability more permissively.
 
 **Status:** Implemented and tested locally on `pydantic-arrow-migration` (commits `e22a02a`, `b470b5f`, `67dc8f1`, 2026-07-09). Not yet opened as a PR or tracking issue — still waiting to hear which option @westonpace prefers before proposing this as the actual migration path.
+
+---
+
+## CodeRabbit Automated Review (Migration Branch)
+
+**Context:** Once the migration commits (`e22a02a`/`b470b5f`/`67dc8f1`) reached PR #7383's branch, CodeRabbit's automated reviewer ran against them and produced three separate review rounds. Each round's findings were verified against the current code before fixing, same discipline as the maintainer review round above.
+
+### Round 1 — 2026-07-22 (3 Major findings)
+
+1. **Validate `model_class` is a Pydantic model before use (`dataset.py`)**
+   `from_pydantic_model()` never checked that `model_class` was actually a `BaseModel` subclass before calling `pydantic_to_schema(model_class)` — passing an arbitrary class failed downstream with an opaque `AttributeError` instead of a clear error at the boundary.
+   Fix: added an explicit `_is_pydantic_base_model_class()` check at the top of `from_pydantic_model()`, raising `TypeError` naming the received value.
+
+2. **Pydantic model lists need an explicit schema when `schema` is omitted (`types.py`)**
+   The plain `write_dataset()` path (not via `from_pydantic_model()`) let `pa.RecordBatch.from_pylist()` infer types from the batch itself, so an `Optional[T]` field that was `None` for every row in a batch got typed as Arrow's literal `null` type instead of its real type.
+   Fix: `_coerce_reader()`'s Pydantic branch now derives the schema via `pydantic_to_schema()` when `schema is None`, matching `from_pydantic_model()`'s behavior.
+
+3. **`is_nullable()` ignores custom `Vector`/`MultiVector(nullable=...)` under Pydantic v1 (`pydantic.py`)**
+   The v1 branch returned `bool(field.allow_none)` immediately and never reached the `FixedSizeListMixin.nullable()` check, so `embedding: Vector(8, nullable=True)` under Pydantic v1 always produced a non-nullable Arrow field, silently ignoring the `nullable` parameter.
+   Fix: the v1 branch now checks the field's underlying type for `FixedSizeListMixin` and returns its `nullable()` value before falling back to `allow_none`.
+
+**Fixed & tested — commit `2ba82823d`.**
+
+### Round 2 — 2026-07-23 (1 Minor finding)
+
+**Validate every Pydantic list item before serialization, not just the first**
+Both `from_pydantic_model()` and the plain `write_dataset()` Pydantic path only checked the model class / first list item. A later dict would reach `model_to_dict()` and raise an opaque `AttributeError`; a later instance of a *different* Pydantic model would be silently serialized against the first item's schema instead of erroring.
+Fix: both entry points now validate every item up front, raising a `TypeError` naming the offending index, expected type, actual type, and list size.
+
+**Fixed & tested — commit `2a1f2e804`.**
+
+### Round 3 — 2026-07-23 (2 Major findings)
+
+1. **Reject non-list Pydantic inputs before iterating (`dataset.py`, `types.py`)**
+   `from_pydantic_model()`'s only guard against empty input was `if not data`, which is always `False` for a generator (generators are truthy). A generator of Pydantic instances would pass that guard, get fully drained by the item-validation loop, and then the serialization step would iterate an already-exhausted generator — silently writing a **0-row table** with no error at all.
+   Fix: both entry points now require `data` to be an actual `list` up front, raising `TypeError` with the received type.
+
+2. **Reject Pydantic subclass instances, not just same-type instances (`types.py`, `dataset.py`)**
+   Item validation used `isinstance(item, model_class)`, which lets a *subclass* instance through even though the Arrow schema is derived from `model_class`'s own declared fields — a subclass instance's extra/overridden fields would then be serialized against a schema that doesn't account for them.
+   Fix: switched to an exact `type(item) is model_class` check.
+
+Both checks were consolidated into one shared `_validate_pydantic_list()` helper in `dependencies.py` (alongside the other pydantic helpers already extracted in the maintainer-review round), rather than duplicating the logic across the two call sites again.
+
+**Fixed & tested — commit `c25888eba`.**
+
+### Verification
+
+Reran `python/tests/test_dataset.py` + `python/tests/test_pydantic.py` after all three rounds: **217 passed, 1 skipped, 4 failed** — the 4 failures are the same pre-existing `nvcc`/CUDA-toolkit failures noted in earlier phases, unrelated to any pydantic code. Added regression tests for the generator-input and subclass-rejection cases from round 3. Ran `uv run make lint` (ruff, ruff-format, typos, cargo check) — clean.
+
+**Current state:** all three rounds committed and pushed to the PR branch (`67dc8f1` → `c25888eba`).
 
 ---
 
